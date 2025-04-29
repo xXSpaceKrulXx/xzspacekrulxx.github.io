@@ -1,0 +1,393 @@
+
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>bubble.am - Sterowanie Myszka</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body, html { margin:0; padding:0; overflow-x:hidden; font-family: Arial; }
+    #menu { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; background: #fff; padding: 30px; border-radius: 10px; box-shadow: 0 0 20px rgba(0,0,0,0.2); }
+    #menu input, #menu select, #menu button { display: block; margin: 10px auto; padding: 10px; width: 250px; border-radius: 8px; border: 1px solid #ccc; }
+    #menu button { background-color: #3498db; color: white; font-weight: bold; cursor: pointer; transition: transform 0.2s; }
+    #menu button:hover { transform: scale(1.05); }
+    #gameCanvas { background: #fafafa; display:none; }
+    #chat { position:fixed; bottom:0; left:0; width:300px; background: rgba(0,0,0,0.6); color:white; padding:10px; height:150px; overflow-y:auto; display:none; }
+    #chat-input { position:fixed; bottom:0; left:0; width:300px; display:none; background:white; }
+    #chat-input input { width:80%; padding:5px; }
+    #chat-input button { width:18%; padding:5px; }
+    #leaderboard { position:fixed; top:10px; right:10px; background:white; padding:10px; border-radius:8px; box-shadow:0 0 10px rgba(0,0,0,0.2); font-size:14px; }
+    #massCounter { position:fixed; top:10px; left:10px; background:white; padding:8px 12px; border-radius:8px; font-size:18px; box-shadow:0 0 10px rgba(0,0,0,0.2); }
+    footer { text-align: center; margin-top: 20px; font-size: 14px; color: #888; }
+    footer a { margin: 0 10px; color: #3498db; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  
+/* Login modal style */
+.modal {
+  display: none;
+  position: fixed;
+  z-index: 10;
+  left: 0; top: 0; width: 100%; height: 100%;
+  background-color: rgba(0,0,0,0.5);
+}
+.modal-content {
+  background: white;
+  margin: 10% auto;
+  padding: 20px;
+  width: 350px;
+  border-radius: 10px;
+  position: relative;
+}
+.modal-content input {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 8px;
+}
+.modal-content button {
+  width: 100%;
+  padding: 10px;
+  background: #3498db;
+  color: white;
+  font-weight: bold;
+  border: none;
+  border-radius: 5px;
+}
+.modal-content .close {
+  position: absolute;
+  top: 10px; right: 15px;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <h1>bubble.am</h1>
+  <input type="text" id="nickname" placeholder="Podaj nick">
+  <select id="gamemode">
+    <option value="ffa">FFA</option>
+    <option value="teams">Teams</option>
+    <option value="solo">Solo Battle</option>
+  </select>
+  <button onclick="startGame()">Play</button>
+  <footer>
+    <a href="#">Home</a> | <button id="loginMenuBtn">Login</button> | <a href="#">Community</a>
+  </footer>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+<div id="massCounter" style="display:none;">Mass: 50</div>
+<div id="chat"></div>
+<div id="chat-input">
+  <input type="text" id="message" placeholder="Napisz wiadomość">
+  <button onclick="sendMessage()">Wyślij</button>
+</div>
+<div id="leaderboard" style="display:none;"><h3>Leaderboard</h3><div id="leaderboard-list"></div></div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+let players = [];
+let food = [];
+let myPlayer = {x: 1500, y: 1500, mass: 50, color: randomColor(), name: "", isMe: true};
+let botPlayer;
+let gamemode = "ffa";
+let baseZoom = 1;
+let manualZoom = 1;
+let mouseX = 0;
+let mouseY = 0;
+let playerWins = 0;
+let botWins = 0;
+const mapSize = 3000;
+
+function randomColor() {
+  const colors = ["#3498db", "#e74c3c", "#2ecc71", "#f1c40f", "#9b59b6"];
+  return colors[Math.floor(Math.random() * colors.length)];
+}
+
+canvas.addEventListener('mousemove', function(event) {
+  mouseX = event.clientX - canvas.width/2;
+  mouseY = event.clientY - canvas.height/2;
+});
+
+function startGame() {
+  document.getElementById('menu').style.display = 'none';
+  canvas.style.display = 'block';
+  document.getElementById('chat').style.display = 'block';
+  document.getElementById('chat-input').style.display = 'flex';
+  document.getElementById('leaderboard').style.display = 'block';
+  document.getElementById('massCounter').style.display = 'block';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  
+  const storedUser = localStorage.getItem('currentUser');
+  if (storedUser) {
+    const userData = JSON.parse(localStorage.getItem('user_' + storedUser));
+    myPlayer.name = userData.username;
+  } else {
+    myPlayer.name = document.getElementById('nickname').value || "Guest";
+  }
+
+  gamemode = document.getElementById('gamemode').value;
+  players = [myPlayer];
+
+  if (gamemode === "solo") {
+    botPlayer = {x: 1600, y: 1600, mass: 50, color: randomColor(), name: "Bot", isMe:false};
+    players.push(botPlayer);
+  } else {
+    for (let i = 0; i < 5; i++) {
+      players.push({x: Math.random()*mapSize, y: Math.random()*mapSize, mass: 50, color: randomColor(), name: "Bot"+(i+1), isMe:false});
+    }
+  }
+
+  food = [];
+  for (let i = 0; i < 200; i++) {
+    food.push({x: Math.random()*mapSize, y: Math.random()*mapSize, mass:1, color: randomColor()});
+  }
+
+  playerWins = 0;
+  botWins = 0;
+  requestAnimationFrame(gameLoop);
+}
+
+function moveTowardsMouse() {
+  let dx = mouseX / (baseZoom * manualZoom);
+  let dy = mouseY / (baseZoom * manualZoom);
+  let dist = Math.hypot(dx, dy);
+  if (dist > 5) {
+    let angle = Math.atan2(dy, dx);
+    let speed = Math.max(1, 5 - (myPlayer.mass/100));
+    myPlayer.x += Math.cos(angle) * speed;
+    myPlayer.y += Math.sin(angle) * speed;
+    myPlayer.x = Math.min(mapSize, Math.max(0, myPlayer.x));
+    myPlayer.y = Math.min(mapSize, Math.max(0, myPlayer.y));
+  }
+}
+
+function gameLoop() {
+  baseZoom = Math.min(1.5, Math.max(0.3, 100 / myPlayer.mass));
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(canvas.width/2, canvas.height/2);
+  ctx.scale(baseZoom * manualZoom, baseZoom * manualZoom);
+  ctx.translate(-myPlayer.x, -myPlayer.y);
+
+  drawGrid();
+  moveTowardsMouse();
+
+  food.forEach((f, index) => {
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, Math.sqrt(f.mass)*4, 0, Math.PI*2);
+    ctx.fillStyle = f.color;
+    ctx.fill();
+    players.forEach(p => {
+      let dist = Math.hypot(p.x-f.x, p.y-f.y);
+      if (dist < Math.sqrt(p.mass)*4) {
+        p.mass += f.mass;
+
+      // Dodaj XP dla gracza, jeśli zalogowany
+      if (p.isMe && localStorage.getItem('currentUser')) {
+        let userData = JSON.parse(localStorage.getItem('user_' + localStorage.getItem('currentUser')));
+        userData.xp += 1;
+        if (userData.xp >= 100) {
+          userData.xp = 0;
+          userData.level += 1;
+        }
+        localStorage.setItem('user_' + userData.username, JSON.stringify(userData));
+        document.getElementById('userLevel').innerText = userData.level;
+        document.getElementById('xpBar').value = userData.xp;
+      }
+
+        food.splice(index,1);
+      }
+    });
+  });
+
+  handleEating();
+
+  players.forEach(p => {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.sqrt(p.mass)*4, 0, Math.PI*2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.strokeStyle = "#333";
+    ctx.stroke();
+    ctx.fillStyle = "#000";
+    ctx.font = "14px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText(p.name, p.x, p.y-Math.sqrt(p.mass)*4-10);
+  });
+
+  ctx.restore();
+
+  moveBots();
+  updateLeaderboard();
+  updateMassCounter();
+  requestAnimationFrame(gameLoop);
+}
+
+function drawGrid() {
+  ctx.strokeStyle = "#eee";
+  const size = 50 * baseZoom * manualZoom;
+  for (let x = 0; x <= mapSize; x += size) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, mapSize);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= mapSize; y += size) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(mapSize, y);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "black";
+  ctx.strokeRect(0, 0, mapSize, mapSize);
+}
+
+function moveBots() {
+  players.forEach(p => {
+    if (!p.isMe) {
+      const speed = Math.max(1, 5 - (p.mass/100));
+      p.x += (Math.random()-0.5)*speed;
+      p.y += (Math.random()-0.5)*speed;
+      p.x = Math.min(mapSize, Math.max(0, p.x));
+      p.y = Math.min(mapSize, Math.max(0, p.y));
+    }
+  });
+}
+
+function handleEating() {
+  if (gamemode !== "solo") return;
+  if (!players.includes(myPlayer) || !players.includes(botPlayer)) {
+    if (!players.includes(myPlayer)) botWins++;
+    if (!players.includes(botPlayer)) playerWins++;
+
+    if (playerWins === 2 || botWins === 2) {
+      showEndPopup();
+    } else {
+      startGame();
+    }
+  }
+}
+
+function updateLeaderboard() {
+  let html = players.sort((a,b)=>b.mass-a.mass).map((p,i)=>`${i+1}. ${p.name}`).join("<br>");
+  document.getElementById('leaderboard-list').innerHTML = html;
+}
+
+function updateMassCounter() {
+  document.getElementById('massCounter').innerText = "Mass: " + Math.floor(myPlayer.mass);
+}
+
+function sendMessage() {
+  const message = document.getElementById('message').value;
+  if (message.trim() !== "") {
+    document.getElementById('chat').innerHTML += "<div><b>"+myPlayer.name+":</b> "+message+"</div>";
+    document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+    document.getElementById('message').value = "";
+  }
+}
+</script>
+
+
+<!-- Modal logowania i konta -->
+<div id="loginModal" class="modal">
+  <div class="modal-content">
+    <span class="close" id="closeLoginModal">&times;</span>
+    <h2>Zaloguj się</h2>
+    <div id="loginForm">
+      <input type="text" id="loginUsername" placeholder="Login">
+      <input type="password" id="loginPassword" placeholder="Hasło">
+      <button onclick="handleLogin()">Zaloguj</button>
+      <hr>
+      <h3>Rejestracja</h3>
+      <input type="text" id="registerUsername" placeholder="Login">
+      <input type="password" id="registerPassword" placeholder="Hasło">
+      <input type="email" id="registerEmail" placeholder="Email">
+      <button onclick="handleRegister()">Zarejestruj</button>
+    </div>
+    <div id="accountPanel" style="display:none;">
+      <h3>Twoje konto</h3>
+      <p><b>Nick:</b> <span id="userNick"></span></p>
+      <p><b>Level:</b> <span id="userLevel">1</span> <progress id="xpBar" value="0" max="100"></progress></p>
+      <p><b>Email:</b> <span id="userEmail"></span></p>
+      <p><b>Punkty:</b> <span id="userPoints">0</span></p>
+      <p><b>Gildia:</b> <span id="userGuild">Brak</span></p>
+      <p><b>Skin:</b> <input type="file" id="uploadSkin" accept="image/*"></p>
+      <button onclick="handleChangePassword()">Zmień hasło</button>
+      <button onclick="handleLogout()">Wyloguj</button>
+    </div>
+  </div>
+</div>
+
+
+<script>
+document.getElementById("loginMenuBtn").onclick = function() {
+  document.getElementById("loginModal").style.display = "block";
+};
+document.getElementById("closeLoginModal").onclick = function() {
+  document.getElementById("loginModal").style.display = "none";
+};
+window.onclick = function(e) {
+  if (e.target == document.getElementById("loginModal")) {
+    document.getElementById("loginModal").style.display = "none";
+  }
+};
+
+// Prosty system konta
+
+function handleChangePassword() {
+  const newPassword = prompt("Podaj nowe hasło:");
+  if (!newPassword) return;
+  const username = localStorage.getItem('currentUser');
+  let userData = JSON.parse(localStorage.getItem('user_' + username));
+  userData.password = newPassword;
+  localStorage.setItem('user_' + username, JSON.stringify(userData));
+  alert("Hasło zostało zmienione!");
+}
+
+function handleRegister() {
+  const username = document.getElementById('registerUsername').value;
+  const password = document.getElementById('registerPassword').value;
+  const email = document.getElementById('registerEmail').value;
+  const userData = { username, password, email, level: 1, xp: 0, points: 0, guild: "Brak" };
+  localStorage.setItem('user_' + username, JSON.stringify(userData));
+  alert("Zarejestrowano pomyślnie!");
+}
+
+function handleLogin() {
+  const username = document.getElementById('loginUsername').value;
+  const password = document.getElementById('loginPassword').value;
+  const userDataRaw = localStorage.getItem('user_' + username);
+  if (!userDataRaw) return alert("Nie znaleziono konta");
+  const userData = JSON.parse(userDataRaw);
+  if (userData.password !== password) return alert("Niepoprawne hasło");
+  localStorage.setItem('currentUser', username);
+  showAccountPanel(userData);
+}
+
+function showAccountPanel(userData) {
+  document.getElementById('loginForm').style.display = 'none';
+  document.getElementById('accountPanel').style.display = 'block';
+  document.getElementById('userNick').innerText = userData.username;
+  document.getElementById('userLevel').innerText = userData.level;
+  document.getElementById('xpBar').value = userData.xp;
+  document.getElementById('userEmail').innerText = userData.email;
+  document.getElementById('userPoints').innerText = userData.points;
+  document.getElementById('userGuild').innerText = userData.guild;
+}
+
+function handleLogout() {
+  localStorage.removeItem('currentUser');
+  document.getElementById('loginForm').style.display = 'block';
+  document.getElementById('accountPanel').style.display = 'none';
+}
+</script>
+
+</body>
+</html>
